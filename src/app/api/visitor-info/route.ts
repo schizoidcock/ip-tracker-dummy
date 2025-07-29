@@ -77,20 +77,28 @@ async function detectProxyVPN(ip: string, request: NextRequest) {
       if (isTor) torDetectionMethod = 'Official Tor Exit Node List';
     }
   } catch (error) {
-    // Fallback: Check common Tor indicators
-    if (geoData) {
-      const torIndicators = [
-        /tor/i.test(geoData.isp || ''),
-        /tor/i.test(geoData.org || ''),
-        /exit.*node/i.test(geoData.isp || ''),
-        /relay/i.test(geoData.isp || ''),
-        geoData.proxy === true
-      ];
-      
-      if (torIndicators.some(indicator => indicator)) {
-        isTor = true;
-        torDetectionMethod = 'ISP/Organization Analysis';
-      }
+    console.log('⚠️ Tor API unavailable, using fallback detection');
+  }
+  
+  // Enhanced fallback: Check common Tor indicators
+  if (!isTor && geoData) {
+    const torIndicators = [
+      /tor/i.test(geoData.isp || ''),
+      /tor/i.test(geoData.org || ''),
+      /exit.*node/i.test(geoData.isp || ''),
+      /relay/i.test(geoData.isp || ''),
+      /privacy/i.test(geoData.isp || ''),
+      /foundation.*applied.*privacy/i.test(geoData.isp || ''),
+      /foundation.*applied.*privacy/i.test(geoData.org || ''),
+      /torservers/i.test(geoData.org || ''),
+      /article.*19/i.test(geoData.org || ''),
+      geoData.proxy === true && /AS208323/i.test(geoData.as || ''), // Known Tor AS
+      geoData.proxy === true && /vienna/i.test(geoData.city || '') && /foundation/i.test(geoData.org || '')
+    ];
+    
+    if (torIndicators.some(indicator => indicator)) {
+      isTor = true;
+      torDetectionMethod = 'ISP/Organization Pattern Analysis';
     }
   }
 
