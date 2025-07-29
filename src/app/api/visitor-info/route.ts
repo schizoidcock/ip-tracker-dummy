@@ -29,7 +29,7 @@ async function detectProxyVPN(ip: string, request: NextRequest) {
     'x-azure-socketip'
   ];
 
-  const detectedHeaders = [];
+  const detectedHeaders: { header: string; value: string }[] = [];
   for (const header of proxyHeaders) {
     const value = request.headers.get(header);
     if (value) {
@@ -39,7 +39,7 @@ async function detectProxyVPN(ip: string, request: NextRequest) {
 
   // Check for multiple IP addresses in forwarded headers
   const forwardedFor = request.headers.get('x-forwarded-for');
-  let ipChain = [];
+  let ipChain: string[] = [];
   if (forwardedFor) {
     ipChain = forwardedFor.split(',').map(ip => ip.trim());
   }
@@ -53,7 +53,7 @@ async function detectProxyVPN(ip: string, request: NextRequest) {
   const isAutomated = /bot|crawler|spider|scraper/i.test(userAgent);
   
   // Try to get geolocation data for additional analysis
-  let geoData = null;
+  let geoData: any = null;
   try {
     const response = await fetch(`http://ip-api.com/json/${ip}?fields=status,message,country,countryCode,region,regionName,city,zip,lat,lon,timezone,isp,org,as,query,proxy,hosting`);
     if (response.ok) {
