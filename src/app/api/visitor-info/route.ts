@@ -1,5 +1,33 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+// Simple session tracking
+const visitorSessions = new Map();
+let sessionCounter = 1;
+
+function generateSessionId(): string {
+  return `SESSION_${sessionCounter++}_${Date.now()}`;
+}
+
+function getOrCreateSession(ip: string, userAgent: string): string {
+  const sessionKey = `${ip}_${userAgent}`;
+  
+  if (!visitorSessions.has(sessionKey)) {
+    const sessionId = generateSessionId();
+    visitorSessions.set(sessionKey, {
+      sessionId,
+      firstSeen: new Date().toISOString(),
+      visitCount: 0
+    });
+    console.log(`🆕 NEW VISITOR SESSION: ${sessionId}`);
+  }
+  
+  const session = visitorSessions.get(sessionKey);
+  session.visitCount++;
+  session.lastSeen = new Date().toISOString();
+  
+  return session.sessionId;
+}
+
 function getRealIP(request: NextRequest): string {
   const forwarded = request.headers.get('x-forwarded-for');
   const realIP = request.headers.get('x-real-ip');
@@ -201,30 +229,34 @@ export async function POST(request: NextRequest) {
       clientReported: clientData
     };
     
-    // Enhanced logging with proxy/VPN information
+    // Get or create session for this visitor
+    const sessionId = getOrCreateSession(ip, userAgent);
+    const session = visitorSessions.get(`${ip}_${userAgent}`);
+    
+    // Enhanced logging with emojis and session tracking
+    console.log(`\n${'='.repeat(60)}`);
+    console.log(`👤 VISITOR: ${sessionId} (Visit #${session.visitCount})`);
+    console.log(`🌍 IP: ${ip} | 🌎 Country: ${proxyDetection.geoData?.country || 'Unknown'}`);
+    console.log(`🖥️  Device: ${clientData.os || 'Unknown'} | 🌐 Browser: ${clientData.browser || 'Unknown'}`);
+    
     if (proxyDetection.isTor) {
-      console.log('🧅 TOR NETWORK DETECTED:');
-      console.log(`   Detection Method: ${proxyDetection.torDetectionMethod}`);
-      console.log(`   Exit Node IP: ${ip}`);
-      console.log(`   Real IP: ${proxyDetection.realIP}`);
-      console.log(`   Explanation: ${proxyDetection.analysis.explanation}`);
-      if (proxyDetection.geoData) {
-        console.log(`   Exit Node ISP: ${proxyDetection.geoData.isp || 'Unknown'}`);
-        console.log(`   Exit Node Country: ${proxyDetection.geoData.country || 'Unknown'}`);
-      }
+      console.log(`🧅 CONNECTION: Tor Network`);
+      console.log(`   ├─ Method: ${proxyDetection.torDetectionMethod}`);
+      console.log(`   ├─ Exit Node: ${ip}`);
+      console.log(`   ├─ Real IP: Hidden by Tor Network`);
+      console.log(`   └─ ISP: ${proxyDetection.geoData?.isp || 'Unknown'}`);
     } else if (proxyDetection.isLikelyProxy) {
-      console.log('🔍 PROXY/VPN DETECTED:');
-      console.log(`   Real IP: ${proxyDetection.realIP}`);
-      console.log(`   Proxy Chain: ${proxyDetection.ipChain.join(' → ')}`);
-      console.log(`   Type: ${proxyDetection.analysis.type}`);
-      console.log(`   Confidence: ${proxyDetection.analysis.confidence}`);
-      console.log(`   Score: ${proxyDetection.analysis.proxyScore}/10`);
-      if (proxyDetection.geoData) {
-        console.log(`   ISP: ${proxyDetection.geoData.isp || 'Unknown'}`);
-        console.log(`   Organization: ${proxyDetection.geoData.org || 'Unknown'}`);
-        console.log(`   Country: ${proxyDetection.geoData.country || 'Unknown'}`);
-      }
+      console.log(`🔒 CONNECTION: ${proxyDetection.analysis.type}`);
+      console.log(`   ├─ Real IP: ${proxyDetection.realIP}`);
+      console.log(`   ├─ Confidence: ${proxyDetection.analysis.confidence}`);
+      console.log(`   └─ ISP: ${proxyDetection.geoData?.isp || 'Unknown'}`);
+    } else {
+      console.log(`🔓 CONNECTION: Direct`);
+      console.log(`   └─ ISP: ${proxyDetection.geoData?.isp || 'Unknown'}`);
     }
+    
+    console.log(`⏰ Time: ${new Date().toLocaleString()}`);
+    console.log(`${'='.repeat(60)}\n`);
     
     // Log comprehensive visitor data
     console.log('📊 VISITOR DATA LOGGED:', JSON.stringify(logData, null, 2));
@@ -232,6 +264,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       success: true,
       message: 'Visit logged successfully',
+      sessionId,
+      visitCount: session.visitCount,
       serverDetectedIP: ip,
       realIP: proxyDetection.realIP,
       isProxy: proxyDetection.isLikelyProxy,
