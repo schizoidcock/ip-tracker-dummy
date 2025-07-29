@@ -1,5 +1,4 @@
 'use client';
-
 import { useEffect } from 'react';
 
 export default function Home() {
@@ -118,28 +117,13 @@ export default function Home() {
   };
 
   return (
-    <div className="minimal-page">
-      <div className="minimal-title">
-        <span className="access-indicator"></span>
-        ACCESS GRANTED
-      </div>
-      <div className="minimal-subtitle">
-        Visitor tracking active • All data logged
-      </div>
-      <div style={{ 
-        fontFamily: 'Courier New, monospace', 
-        fontSize: '0.9rem', 
-        color: '#666666',
-        marginTop: '40px'
-      }}>
-        IP: {typeof window !== 'undefined' ? 'Detecting...' : 'Loading...'}
-        <br />
-        Location: {typeof window !== 'undefined' ? 'Detecting...' : 'Loading...'}
-        <br />
-        Browser: {typeof navigator !== 'undefined' ? detectBrowser(navigator.userAgent) : 'Loading...'}
-        <br />
-        Device: {typeof navigator !== 'undefined' ? detectDeviceType(navigator.userAgent) : 'Loading...'}
-      </div>
+    <div style={{
+      minHeight: '100vh',
+      backgroundColor: '#ffffff',
+      margin: 0,
+      padding: 0
+    }}>
+      {/* Empty - plain white page */}
     </div>
   );
 }
