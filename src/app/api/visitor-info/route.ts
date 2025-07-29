@@ -63,19 +63,71 @@ async function detectProxyVPN(ip: string, request: NextRequest) {
     console.log('⚠️ Geolocation API unavailable');
   }
 
+  // Enhanced Tor detection
+  let isTor = false;
+  let torDetectionMethod = '';
+  
+  // Check if IP is a known Tor exit node
+  try {
+    // Using TorProject's official exit node list API
+    const torCheckResponse = await fetch(`https://check.torproject.org/api/ip/${ip}`);
+    if (torCheckResponse.ok) {
+      const torData = await torCheckResponse.json();
+      isTor = torData.IsTor === true;
+      if (isTor) torDetectionMethod = 'Official Tor Exit Node List';
+    }
+  } catch (error) {
+    // Fallback: Check common Tor indicators
+    if (geoData) {
+      const torIndicators = [
+        /tor/i.test(geoData.isp || ''),
+        /tor/i.test(geoData.org || ''),
+        /exit.*node/i.test(geoData.isp || ''),
+        /relay/i.test(geoData.isp || ''),
+        geoData.proxy === true
+      ];
+      
+      if (torIndicators.some(indicator => indicator)) {
+        isTor = true;
+        torDetectionMethod = 'ISP/Organization Analysis';
+      }
+    }
+  }
+
+  // Determine connection type with enhanced Tor detection
+  let connectionType = 'Direct';
+  if (isTor) {
+    connectionType = 'Tor Network';
+  } else if (geoData?.hosting) {
+    connectionType = 'Hosting/VPS';
+  } else if (geoData?.proxy) {
+    connectionType = 'Proxy/VPN';
+  } else if (hasMultipleIPs) {
+    connectionType = 'Proxy Chain';
+  } else if (isLikelyProxy) {
+    connectionType = 'Proxy/VPN';
+  }
+
   return {
-    isLikelyProxy,
+    isLikelyProxy: isLikelyProxy || isTor,
     hasMultipleIPs,
+    isTor,
+    torDetectionMethod,
     proxyHeaders: detectedHeaders,
     ipChain,
-    realIP: ipChain.length > 0 ? ipChain[0] : ip,
+    realIP: isTor ? 'Hidden by Tor Network' : (ipChain.length > 0 ? ipChain[0] : ip),
     proxyChain: ipChain.length > 1 ? ipChain.slice(1) : [],
     isAutomated,
     geoData,
     analysis: {
-      proxyScore: detectedHeaders.length + (hasMultipleIPs ? 2 : 0) + (isAutomated ? 1 : 0),
-      confidence: isLikelyProxy ? 'High' : 'Low',
-      type: geoData?.hosting ? 'Hosting/VPS' : geoData?.proxy ? 'Proxy/VPN' : hasMultipleIPs ? 'Proxy Chain' : 'Direct'
+      proxyScore: detectedHeaders.length + (hasMultipleIPs ? 2 : 0) + (isAutomated ? 1 : 0) + (isTor ? 5 : 0),
+      confidence: (isTor || isLikelyProxy) ? 'High' : 'Low',
+      type: connectionType,
+      explanation: isTor 
+        ? 'Real IP cannot be determined - Tor network provides anonymity by design'
+        : connectionType === 'Direct' 
+        ? 'Direct connection detected'
+        : 'Proxy/VPN detected - real IP may be hidden'
     }
   };
 }
@@ -142,7 +194,17 @@ export async function POST(request: NextRequest) {
     };
     
     // Enhanced logging with proxy/VPN information
-    if (proxyDetection.isLikelyProxy) {
+    if (proxyDetection.isTor) {
+      console.log('🧅 TOR NETWORK DETECTED:');
+      console.log(`   Detection Method: ${proxyDetection.torDetectionMethod}`);
+      console.log(`   Exit Node IP: ${ip}`);
+      console.log(`   Real IP: ${proxyDetection.realIP}`);
+      console.log(`   Explanation: ${proxyDetection.analysis.explanation}`);
+      if (proxyDetection.geoData) {
+        console.log(`   Exit Node ISP: ${proxyDetection.geoData.isp || 'Unknown'}`);
+        console.log(`   Exit Node Country: ${proxyDetection.geoData.country || 'Unknown'}`);
+      }
+    } else if (proxyDetection.isLikelyProxy) {
       console.log('🔍 PROXY/VPN DETECTED:');
       console.log(`   Real IP: ${proxyDetection.realIP}`);
       console.log(`   Proxy Chain: ${proxyDetection.ipChain.join(' → ')}`);
@@ -165,7 +227,9 @@ export async function POST(request: NextRequest) {
       serverDetectedIP: ip,
       realIP: proxyDetection.realIP,
       isProxy: proxyDetection.isLikelyProxy,
+      isTor: proxyDetection.isTor,
       proxyType: proxyDetection.analysis.type,
+      explanation: proxyDetection.analysis.explanation,
       timestamp
     });
   } catch (error) {
