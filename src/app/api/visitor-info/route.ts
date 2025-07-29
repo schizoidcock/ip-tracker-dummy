@@ -261,6 +261,11 @@ export async function POST(request: NextRequest) {
     // Log comprehensive visitor data
     console.log('📊 VISITOR DATA LOGGED:', JSON.stringify(logData, null, 2));
     
+    // End divisor for clear log separation
+    console.log(`\n${'▼'.repeat(60)}`);
+    console.log(`🔚 END OF ${sessionId} LOGS`);
+    console.log(`${'▲'.repeat(60)}\n`);
+    
     return NextResponse.json({
       success: true,
       message: 'Visit logged successfully',
