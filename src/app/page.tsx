@@ -101,23 +101,26 @@ export default function Home() {
         // 2. Multiple geolocation services in parallel (fastest wins)
         promises.push(
           // Service 1: ipapi.co (usually fastest)
-          fetch('https://ipapi.co/json/', { 
-            signal: AbortSignal.timeout(2000) // 2s timeout
-          }).then(r => r.json()).catch(() => null)
+          Promise.race([
+            fetch('https://ipapi.co/json/').then(r => r.json()),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 2000))
+          ]).catch(() => null)
         );
         
         promises.push(
           // Service 2: ipify as backup
-          fetch('https://api.ipify.org?format=json', {
-            signal: AbortSignal.timeout(2000) // 2s timeout
-          }).then(r => r.json()).catch(() => null)
+          Promise.race([
+            fetch('https://api.ipify.org?format=json').then(r => r.json()),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 2000))
+          ]).catch(() => null)
         );
         
         promises.push(
           // Service 3: ip-api.com as another backup
-          fetch('http://ip-api.com/json/?fields=status,country,countryCode,region,city,lat,lon,timezone,isp,org,as,query', {
-            signal: AbortSignal.timeout(2000) // 2s timeout
-          }).then(r => r.json()).catch(() => null)
+          Promise.race([
+            fetch('http://ip-api.com/json/?fields=status,country,countryCode,region,city,lat,lon,timezone,isp,org,as,query').then(r => r.json()),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 2000))
+          ]).catch(() => null)
         );
 
         // Wait for all parallel requests to complete

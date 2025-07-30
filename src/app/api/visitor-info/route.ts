@@ -70,16 +70,18 @@ async function detectProxyVPN(ip: string, request: NextRequest) {
   
   // Promise 1: Fast geolocation (with shorter timeout)
   promises.push(
-    fetch(`http://ip-api.com/json/${ip}?fields=status,country,countryCode,city,isp,org,proxy,hosting`, {
-      signal: AbortSignal.timeout(1500) // Reduced from default timeout
-    }).then(r => r.json()).catch(() => null)
+    Promise.race([
+      fetch(`http://ip-api.com/json/${ip}?fields=status,country,countryCode,city,isp,org,proxy,hosting`).then(r => r.json()),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 1500))
+    ]).catch(() => null)
   );
   
   // Promise 2: Tor detection (with timeout)
   promises.push(
-    fetch(`https://check.torproject.org/api/ip/${ip}`, {
-      signal: AbortSignal.timeout(1000) // Very short timeout for Tor check
-    }).then(r => r.json()).catch(() => null)
+    Promise.race([
+      fetch(`https://check.torproject.org/api/ip/${ip}`).then(r => r.json()),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 1000))
+    ]).catch(() => null)
   );
 
   const [geoData, torData] = await Promise.allSettled(promises);
