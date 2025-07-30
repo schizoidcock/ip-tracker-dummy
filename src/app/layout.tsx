@@ -4,9 +4,8 @@ import { Inter } from 'next/font/google'
 const inter = Inter({ subsets: ['latin'] })
 
 export const metadata = {
-  title: 'IP Tracker - Visitor Information Dashboard',
-  description: 'Professional visitor tracking and IP analysis tool',
-  keywords: 'IP tracker, visitor analytics, browser detection, geolocation',
+  title: '',
+  description: '',
 }
 
 export default function RootLayout({

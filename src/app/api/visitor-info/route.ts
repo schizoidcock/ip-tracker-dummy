@@ -40,109 +40,77 @@ function getRealIP(request: NextRequest): string {
   return 'Unknown';
 }
 
-// Enhanced proxy/VPN detection
+// Enhanced proxy/VPN detection with faster processing
 async function detectProxyVPN(ip: string, request: NextRequest) {
+  const startTime = Date.now();
+  
   const proxyHeaders = [
-    'x-forwarded-for',
-    'x-real-ip',
-    'x-forwarded-proto',
-    'x-forwarded-host',
-    'x-cluster-client-ip',
-    'x-originating-ip',
-    'cf-connecting-ip',
-    'true-client-ip',
-    'x-client-ip',
-    'fastly-client-ip',
-    'x-azure-clientip',
-    'x-azure-socketip'
+    'x-forwarded-for', 'x-real-ip', 'cf-connecting-ip', 'true-client-ip',
+    'x-forwarded-proto', 'x-forwarded-host', 'x-cluster-client-ip'
   ];
 
   const detectedHeaders: { header: string; value: string }[] = [];
-  for (const header of proxyHeaders) {
+  proxyHeaders.forEach(header => {
     const value = request.headers.get(header);
-    if (value) {
-      detectedHeaders.push({ header, value });
-    }
-  }
+    if (value) detectedHeaders.push({ header, value });
+  });
 
-  // Check for multiple IP addresses in forwarded headers
+  // Quick IP chain analysis
   const forwardedFor = request.headers.get('x-forwarded-for');
-  let ipChain: string[] = [];
-  if (forwardedFor) {
-    ipChain = forwardedFor.split(',').map(ip => ip.trim());
-  }
-
-  // Basic VPN/Proxy indicators
-  const isLikelyProxy = detectedHeaders.length > 0 || ipChain.length > 1;
+  const ipChain = forwardedFor ? forwardedFor.split(',').map(ip => ip.trim()) : [];
   const hasMultipleIPs = ipChain.length > 1;
-  
-  // Additional checks
+  const isLikelyProxy = detectedHeaders.length > 0 || hasMultipleIPs;
+
+  // Basic automation detection
   const userAgent = request.headers.get('user-agent') || '';
   const isAutomated = /bot|crawler|spider|scraper/i.test(userAgent);
-  
-  // Try to get geolocation data for additional analysis
-  let geoData: any = null;
-  try {
-    const response = await fetch(`http://ip-api.com/json/${ip}?fields=status,message,country,countryCode,region,regionName,city,zip,lat,lon,timezone,isp,org,as,query,proxy,hosting`);
-    if (response.ok) {
-      geoData = await response.json();
-    }
-  } catch (error) {
-    console.log('⚠️ Geolocation API unavailable');
-  }
 
-  // Enhanced Tor detection
-  let isTor = false;
-  let torDetectionMethod = '';
+  // PARALLEL geolocation and Tor detection for speed
+  const promises = [];
   
-  // Check if IP is a known Tor exit node
-  try {
-    // Using TorProject's official exit node list API
-    const torCheckResponse = await fetch(`https://check.torproject.org/api/ip/${ip}`);
-    if (torCheckResponse.ok) {
-      const torData = await torCheckResponse.json();
-      isTor = torData.IsTor === true;
-      if (isTor) torDetectionMethod = 'Official Tor Exit Node List';
-    }
-  } catch (error) {
-    console.log('⚠️ Tor API unavailable, using fallback detection');
-  }
+  // Promise 1: Fast geolocation (with shorter timeout)
+  promises.push(
+    fetch(`http://ip-api.com/json/${ip}?fields=status,country,countryCode,city,isp,org,proxy,hosting`, {
+      signal: AbortSignal.timeout(1500) // Reduced from default timeout
+    }).then(r => r.json()).catch(() => null)
+  );
   
-  // Enhanced fallback: Check common Tor indicators
-  if (!isTor && geoData) {
-    const torIndicators = [
-      /tor/i.test(geoData.isp || ''),
-      /tor/i.test(geoData.org || ''),
-      /exit.*node/i.test(geoData.isp || ''),
-      /relay/i.test(geoData.isp || ''),
-      /privacy/i.test(geoData.isp || ''),
-      /foundation.*applied.*privacy/i.test(geoData.isp || ''),
-      /foundation.*applied.*privacy/i.test(geoData.org || ''),
-      /torservers/i.test(geoData.org || ''),
-      /article.*19/i.test(geoData.org || ''),
-      geoData.proxy === true && /AS208323/i.test(geoData.as || ''), // Known Tor AS
-      geoData.proxy === true && /vienna/i.test(geoData.city || '') && /foundation/i.test(geoData.org || '')
-    ];
+  // Promise 2: Tor detection (with timeout)
+  promises.push(
+    fetch(`https://check.torproject.org/api/ip/${ip}`, {
+      signal: AbortSignal.timeout(1000) // Very short timeout for Tor check
+    }).then(r => r.json()).catch(() => null)
+  );
+
+  const [geoData, torData] = await Promise.allSettled(promises);
+  
+  // Process results quickly
+  const geo = geoData.status === 'fulfilled' ? geoData.value : null;
+  const tor = torData.status === 'fulfilled' ? torData.value : null;
+  
+  // Fast Tor detection
+  let isTor = tor?.IsTor === true;
+  let torDetectionMethod = isTor ? 'Official Tor Exit Node List' : '';
+  
+  // Quick fallback Tor detection using ISP patterns
+  if (!isTor && geo) {
+    const torPatterns = ['tor', 'exit', 'relay', 'privacy foundation'];
+    const isp = (geo.isp || '').toLowerCase();
+    const org = (geo.org || '').toLowerCase();
     
-    if (torIndicators.some(indicator => indicator)) {
+    if (torPatterns.some(pattern => isp.includes(pattern) || org.includes(pattern))) {
       isTor = true;
-      torDetectionMethod = 'ISP/Organization Pattern Analysis';
+      torDetectionMethod = 'ISP Pattern Analysis';
     }
   }
 
-  // Determine connection type with enhanced Tor detection
+  // Determine connection type quickly
   let connectionType = 'Direct';
-  if (isTor) {
-    connectionType = 'Tor Network';
-  } else if (geoData?.hosting) {
-    connectionType = 'Hosting/VPS';
-  } else if (geoData?.proxy) {
-    connectionType = 'Proxy/VPN';
-  } else if (hasMultipleIPs) {
-    connectionType = 'Proxy Chain';
-  } else if (isLikelyProxy) {
-    connectionType = 'Proxy/VPN';
-  }
+  if (isTor) connectionType = 'Tor Network';
+  else if (geo?.hosting) connectionType = 'Hosting/VPS';
+  else if (geo?.proxy || isLikelyProxy) connectionType = 'Proxy/VPN';
+
+  const processingTime = Date.now() - startTime;
 
   return {
     isLikelyProxy: isLikelyProxy || isTor,
@@ -151,14 +119,15 @@ async function detectProxyVPN(ip: string, request: NextRequest) {
     torDetectionMethod,
     proxyHeaders: detectedHeaders,
     ipChain,
-    realIP: isTor ? 'Hidden by Tor Network' : (ipChain.length > 0 ? ipChain[0] : ip),
-    proxyChain: ipChain.length > 1 ? ipChain.slice(1) : [],
+    realIP: isTor ? 'Hidden by Tor Network' : (ipChain[0] || ip),
+    proxyChain: ipChain.slice(1),
     isAutomated,
-    geoData,
+    geoData: geo,
     analysis: {
       proxyScore: detectedHeaders.length + (hasMultipleIPs ? 2 : 0) + (isAutomated ? 1 : 0) + (isTor ? 5 : 0),
       confidence: (isTor || isLikelyProxy) ? 'High' : 'Low',
       type: connectionType,
+      processingTime: `${processingTime}ms`,
       explanation: isTor 
         ? 'Real IP cannot be determined - Tor network provides anonymity by design'
         : connectionType === 'Direct' 
@@ -207,83 +176,112 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  const startTime = Date.now();
   const timestamp = new Date().toISOString();
   const ip = getRealIP(request);
   const userAgent = request.headers.get('user-agent') || 'Unknown';
   
   try {
     const clientData = await request.json();
+    const dataType = clientData.type || 'UNKNOWN';
     
-    // Get proxy/VPN detection
-    const proxyDetection = await detectProxyVPN(ip, request);
+    // Fast-track instant capture data (minimal processing)
+    if (dataType === 'INSTANT_CAPTURE') {
+      const sessionId = getOrCreateSession(ip, userAgent);
+      const session = visitorSessions.get(`${ip}_${userAgent}`);
+      
+      console.log(`⚡ INSTANT CAPTURE - ${sessionId} (Visit #${session.visitCount})`);
+      console.log(`   ├─ Speed: ${clientData.captureSpeed}`);
+      console.log(`   ├─ Browser: ${clientData.userAgent.split(' ')[0]}`);
+      console.log(`   └─ IP: ${ip}`);
+      
+      return NextResponse.json({
+        success: true,
+        message: 'Instant capture logged',
+        sessionId,
+        processingTime: `${Date.now() - startTime}ms`
+      });
+    }
     
-    const logData = {
-      timestamp,
-      serverDetected: {
-        ip,
-        userAgent,
-        referer: request.headers.get('referer') || 'Direct',
-        host: request.headers.get('host') || 'Unknown',
-        proxyDetection
-      },
-      clientReported: clientData
-    };
+    // Performance metrics (minimal processing)
+    if (dataType === 'PERFORMANCE_METRICS') {
+      console.log(`📊 PERFORMANCE METRICS:`);
+      console.log(`   ├─ Total Capture Time: ${clientData.totalCaptureTime}ms`);
+      console.log(`   ├─ Main Data Result: ${clientData.mainDataResult}`);
+      console.log(`   └─ Geo Data Available: ${clientData.geoDataAvailable}`);
+      
+      return NextResponse.json({ success: true, message: 'Metrics logged' });
+    }
     
-    // Get or create session for this visitor
+    // Error reports (minimal processing)
+    if (dataType === 'CAPTURE_ERROR') {
+      console.error(`❌ CAPTURE ERROR: ${clientData.error}`);
+      return NextResponse.json({ success: true, message: 'Error logged' });
+    }
+    
+    // Geolocation data (skip proxy detection for speed)
+    if (dataType === 'GEOLOCATION_DATA') {
+      console.log(`🌍 GEOLOCATION (${clientData.source}):`);
+      console.log(`   ├─ Location: ${clientData.city}, ${clientData.country}`);
+      console.log(`   ├─ ISP: ${clientData.isp || 'Unknown'}`);
+      console.log(`   └─ IP: ${clientData.ip || ip}`);
+      
+      return NextResponse.json({ success: true, message: 'Geolocation logged' });
+    }
+    
+    // Main data processing (full analysis but optimized)
+    let proxyDetection = null;
+    if (dataType === 'MAIN_DATA') {
+      // Only run proxy detection for main data to save time
+      proxyDetection = await detectProxyVPN(ip, request);
+    }
+    
     const sessionId = getOrCreateSession(ip, userAgent);
     const session = visitorSessions.get(`${ip}_${userAgent}`);
     
-    // Enhanced logging with emojis and session tracking
-    console.log(`\n${'='.repeat(60)}`);
-    console.log(`👤 VISITOR: ${sessionId} (Visit #${session.visitCount})`);
-    console.log(`🌍 IP: ${ip} | 🌎 Country: ${proxyDetection.geoData?.country || 'Unknown'}`);
-    console.log(`🖥️  Device: ${clientData.os || 'Unknown'} | 🌐 Browser: ${clientData.browser || 'Unknown'}`);
-    
-    if (proxyDetection.isTor) {
-      console.log(`🧅 CONNECTION: Tor Network`);
-      console.log(`   ├─ Method: ${proxyDetection.torDetectionMethod}`);
-      console.log(`   ├─ Exit Node: ${ip}`);
-      console.log(`   ├─ Real IP: Hidden by Tor Network`);
-      console.log(`   └─ ISP: ${proxyDetection.geoData?.isp || 'Unknown'}`);
-    } else if (proxyDetection.isLikelyProxy) {
-      console.log(`🔒 CONNECTION: ${proxyDetection.analysis.type}`);
-      console.log(`   ├─ Real IP: ${proxyDetection.realIP}`);
-      console.log(`   ├─ Confidence: ${proxyDetection.analysis.confidence}`);
-      console.log(`   └─ ISP: ${proxyDetection.geoData?.isp || 'Unknown'}`);
-    } else {
-      console.log(`🔓 CONNECTION: Direct`);
-      console.log(`   └─ ISP: ${proxyDetection.geoData?.isp || 'Unknown'}`);
+    // Optimized logging based on data type
+    if (dataType === 'MAIN_DATA') {
+      console.log(`\n${'='.repeat(50)}`);
+      console.log(`👤 VISITOR: ${sessionId} (Visit #${session.visitCount})`);
+      console.log(`🌍 IP: ${ip} | 🌎 Location: ${proxyDetection.geoData?.country || 'Unknown'}`);
+      console.log(`🖥️  Device: ${clientData.os} | 🌐 Browser: ${clientData.browser}`);
+      console.log(`📱 Type: ${clientData.deviceType} | 📏 Screen: ${clientData.screenResolution}`);
+      
+      if (proxyDetection.isTor) {
+        console.log(`🧅 CONNECTION: Tor Network (${proxyDetection.torDetectionMethod})`);
+      } else if (proxyDetection.isLikelyProxy) {
+        console.log(`🔒 CONNECTION: ${proxyDetection.analysis.type}`);
+      } else {
+        console.log(`🔓 CONNECTION: Direct`);
+      }
+      
+      console.log(`⚡ Capture Speed: ${clientData.captureTime}ms | Processing: ${proxyDetection.analysis.processingTime}`);
+      console.log(`⏰ Time: ${new Date().toLocaleString()}`);
+      console.log(`${'='.repeat(50)}\n`);
     }
     
-    console.log(`⏰ Time: ${new Date().toLocaleString()}`);
-    console.log(`${'='.repeat(60)}\n`);
-    
-    // Log comprehensive visitor data
-    console.log('📊 VISITOR DATA LOGGED:', JSON.stringify(logData, null, 2));
-    
-    // End divisor for clear log separation
-    console.log(`\n${'▼'.repeat(60)}`);
-    console.log(`🔚 END OF ${sessionId} LOGS`);
-    console.log(`${'▲'.repeat(60)}\n`);
+    const processingTime = Date.now() - startTime;
     
     return NextResponse.json({
       success: true,
-      message: 'Visit logged successfully',
+      message: `${dataType} logged successfully`,
       sessionId,
       visitCount: session.visitCount,
       serverDetectedIP: ip,
-      realIP: proxyDetection.realIP,
-      isProxy: proxyDetection.isLikelyProxy,
-      isTor: proxyDetection.isTor,
-      proxyType: proxyDetection.analysis.type,
-      explanation: proxyDetection.analysis.explanation,
+      realIP: proxyDetection?.realIP || ip,
+      isProxy: proxyDetection?.isLikelyProxy || false,
+      isTor: proxyDetection?.isTor || false,
+      proxyType: proxyDetection?.analysis.type || 'Unknown',
+      processingTime: `${processingTime}ms`,
       timestamp
     });
+    
   } catch (error) {
     console.error('❌ Error processing visitor data:', error);
     return NextResponse.json({
       success: false,
-      error: 'Failed to process visitor data'
+      error: 'Failed to process visitor data',
+      processingTime: `${Date.now() - startTime}ms`
     }, { status: 400 });
   }
 }
