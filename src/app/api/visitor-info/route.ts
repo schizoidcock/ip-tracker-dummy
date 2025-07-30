@@ -242,7 +242,7 @@ export async function POST(request: NextRequest) {
     const session = visitorSessions.get(`${ip}_${userAgent}`);
     
     // Optimized logging based on data type
-    if (dataType === 'MAIN_DATA') {
+    if (dataType === 'MAIN_DATA' && proxyDetection) {
       console.log(`\n${'='.repeat(50)}`);
       console.log(`👤 VISITOR: ${sessionId} (Visit #${session.visitCount})`);
       console.log(`🌍 IP: ${ip} | 🌎 Location: ${proxyDetection.geoData?.country || 'Unknown'}`);
