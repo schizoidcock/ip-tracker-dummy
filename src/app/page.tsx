@@ -178,7 +178,7 @@ export default function Home() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             type: 'CAPTURE_ERROR',
-            error: error.message,
+            error: error instanceof Error ? error.message : String(error),
             timestamp: new Date().toISOString(),
           }),
           keepalive: true
